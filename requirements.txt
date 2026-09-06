@@ -1,1 +1,3 @@
-
+python-telegram-bot==20.7
+# او اذا تستخدم aiogram
+# aiogram==3.4.1
