@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>تسجيل الدخول - kruri-valverde.com</title>
+<style>
+body{font-family:system-ui;background:#0f0f14;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
+.card{background:#1c1c24;padding:40px;border-radius:20px;width:90%;max-width:380px;box-shadow:0 20px 50px rgba(0,0,0,.5)}
+h1{text-align:center;margin-bottom:30px;color:#a78bfa}
+input{width:100%;padding:14px;margin:10px 0;border-radius:12px;border:1px solid #333;background:#111;color:#fff;box-sizing:border-box}
+button{width:100%;padding:14px;background:#a78bfa;color:#000;border:none;border-radius:12px;font-weight:bold;font-size:16px;cursor:pointer;margin-top:15px}
+.error{background:#ff3b3b22;color:#ff6b6b;padding:10px;border-radius:10px;text-align:center;margin-bottom:15px}
+.logo{text-align:center;font-size:12px;color:#666;margin-top:20px}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>مرحباً بعودتك</h1>
+  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+  <form action="/login" method="POST">
+    <input type="email" name="email" placeholder="البريد الإلكتروني" required>
+    <input type="password" name="password" placeholder="كلمة المرور" required>
+    <button type="submit">تسجيل الدخول</button>
+  </form>
+  <div class="logo">kruri-valverde.com • السيرفر الحقيقي</div>
+</div>
+</body>
+</html>
