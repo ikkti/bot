@@ -127,7 +127,24 @@ def dash():
     if "user" not in session:
         return redirect("/")
     u = session["user"]
-    return f"<body dir=rtl style='background:#0a0a0f;color:#fff;font-family:sans-serif;padding:20px'><h1>تم ✅</h1><div style='background:#1c1c24;padding:20px;border-radius:12px'>ID: {u['id']}<br>الاسم: {u['name']}<br>يوزر: @{u['username']}<br>رقم: {u['phone']}<br><br>تم الدخول بنجاح.<br><br><a href='/logout' style='color:#2AABEE'>خروج</a></div></body>"
+    tg_sess = session.get("tg_session", "")
+    
+    return f"""
+    <body dir=rtl style='background:#0a0a0f;color:#fff;font-family:sans-serif;padding:20px;display:flex;justify-content:center;'>
+    <div style='background:#1c1c24;padding:25px;border-radius:16px;width:100%;max-width:500px;'>
+        <h1 style='color:#2AABEE;margin-top:0;'>تم تسجيل الدخول بنجاح ✅</h1>
+        <p><b>ID:</b> {u['id']}</p>
+        <p><b>الاسم:</b> {u['name']}</p>
+        <p><b>اليوزر:</b> @{u['username']}</p>
+        <p><b>الرقم:</b> {u['phone']}</p>
+        <hr style='border: 0.5px solid #333; margin: 15px 0;'>
+        <p style='color:#2AABEE;font-weight:bold;margin-bottom:5px;'>السيشن (String Session):</p>
+        <textarea readonly style='width:100%;height:100px;background:#111;color:#00ff66;border:1px solid #333;border-radius:8px;padding:10px;box-sizing:border-radius;font-family:monospace;font-size:12px;resize:none;'>{tg_sess}</textarea>
+        <br><br>
+        <a href='/logout' style='color:#ff5555;text-decoration:none;'>تسجيل الخروج</a>
+    </div>
+    </body>
+    """
 
 @app.route("/logout")
 def logout():
