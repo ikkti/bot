@@ -6,7 +6,6 @@ from flask import Flask, request, session, redirect, render_template_string
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "kruri-secret-2026")
 
-# نقرا api_id من Fly secrets
 try:
     CFG = json.loads(os.getenv("APP_CONFIG", "{}"))
 except:
@@ -19,7 +18,7 @@ from telethon.sessions import StringSession
 from telethon import TelegramClient
 from telethon.errors import SessionPasswordNeededError
 
-CLIENTS = {} # phone -> {session, hash}
+CLIENTS = {}
 
 def run(coro):
     loop = asyncio.new_event_loop()
@@ -37,13 +36,12 @@ LOGIN_HTML = """
 button{width:100%;padding:14px;background:#2AABEE;border:0;border-radius:10px;color:#fff;font-weight:bold}
 .err{background:#ff000022;color:#ff8a8a;padding:10px;border-radius:8px;margin-bottom:10px;text-align:center}
 </style></head><body><div class="card">
-<h2 style="text-align:center;color:#2AABEE">دخول تليجرام بـ api_id</h2>
+<h2 style="text-align:center;color:#2AABEE">تسجيل الدخول</h2>
 {{err}}
 <form method="post" action="/send-code">
 <input name="phone" placeholder="+9647XXXXXXXX" required value="+964">
 <button>ارسال الكود</button>
 </form>
-<p style="color:#666;font-size:12px;text-align:center">API_ID: {{api_id}} - kruri-valverde.com</p>
 </div></body></html>
 """
 
@@ -72,8 +70,8 @@ def home():
     if "user" in session:
         return redirect("/dashboard")
     if not API_ID or not API_HASH:
-        return f"<h1>API_ID/API_HASH ما موجود - سوي fly secrets set APP_CONFIG</h1><p>{CFG}</p>"
-    return render_template_string(LOGIN_HTML, api_id=API_ID, err="")
+        return "<h1>خطأ في النظام: لم يتم ضبط بيانات الاعتماد.</h1>"
+    return render_template_string(LOGIN_HTML, err="")
 
 @app.route("/send-code", methods=["POST"])
 def send_code():
@@ -88,7 +86,7 @@ def send_code():
             CLIENTS[phone] = {"sess": client.session.save(), "hash": sent.phone_code_hash}
             return render_template_string(CODE_HTML, phone=phone, err="")
         except Exception as e:
-            return render_template_string(LOGIN_HTML, api_id=API_ID, err=f"<div class='err'>{e}</div>")
+            return render_template_string(LOGIN_HTML, err=f"<div class='err'>{e}</div>")
         finally:
             await client.disconnect()
     return run(_do())
@@ -129,7 +127,7 @@ def dash():
     if "user" not in session:
         return redirect("/")
     u = session["user"]
-    return f"<body dir=rtl style='background:#0a0a0f;color:#fff;font-family:sans-serif;padding:20px'><h1>تم ✅</h1><div style='background:#1c1c24;padding:20px;border-radius:12px'>ID: {u['id']}<br>الاسم: {u['name']}<br>يوزر: @{u['username']}<br>رقم: {u['phone']}<br><br>دخول ناجح عن طريق api_id: {API_ID}<br><br><a href='/logout' style='color:#2AABEE'>خروج</a></div></body>"
+    return f"<body dir=rtl style='background:#0a0a0f;color:#fff;font-family:sans-serif;padding:20px'><h1>تم ✅</h1><div style='background:#1c1c24;padding:20px;border-radius:12px'>ID: {u['id']}<br>الاسم: {u['name']}<br>يوزر: @{u['username']}<br>رقم: {u['phone']}<br><br>تم الدخول بنجاح.<br><br><a href='/logout' style='color:#2AABEE'>خروج</a></div></body>"
 
 @app.route("/logout")
 def logout():
@@ -138,8 +136,7 @@ def logout():
 
 @app.route("/health")
 def health():
-    return {"ok": True, "api_id": bool(API_ID), "api_hash": bool(API_HASH)}
+    return {"ok": True}
 
-# مهم لـ Fly
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
