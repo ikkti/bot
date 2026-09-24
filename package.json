@@ -1,0 +1,15 @@
+{
+  "name": "live-audio-stream-server",
+  "version": "1.0.0",
+  "description": "Ultra low-latency live audio broadcast server with REST API and WebSocket for Fly.io",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.17.0",
+    "dotenv": "^16.4.5",
+    "cors": "^2.8.5"
+  }
+}
