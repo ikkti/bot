@@ -1,5 +1,10 @@
+# fly.toml app configuration file generated for live-audio-server on 2026-09-26T19:48:05Z
+#
+# See https://docs.fly.io/reference/configuration for information about how to use this file.
+#
+
 app = "live-audio-server"
-primary_region = "fra"
+primary_region = 'fra'
 
 [build]
 
@@ -9,13 +14,17 @@ primary_region = "fra"
   auto_stop_machines = false
   auto_start_machines = true
   min_machines_running = 1
-
-  [http_service.concurrency]
-    type = "connections"
-    hard_limit = 5000
-    soft_limit = 3500
+  concurrency = { hard_limit = 5000, soft_limit = 3500, type = 'connections' }
 
 [[vm]]
-  cpu_kind = "shared"
+  cpu_kind = 'shared'
   cpus = 1
   memory_mb = 512
+
+[[vm]]
+  cpu_kind = 'shared'
+  cpus = 2
+  memory_mb = 768
+  memory = '768mb'
+  processes = ['app']
+  size = 'shared-cpu-2x'
