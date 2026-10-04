@@ -8,13 +8,11 @@ import logging
 import base64
 import mimetypes
 import re
-from functools import wraps
 
 import requests
-from flask import Flask, request, jsonify, render_template_string, session, redirect, url_for
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 import telebot
-from telebot import types
 
 # Optional document readers
 try:
@@ -37,11 +35,6 @@ try:
 except Exception:
     Image = None
 
-try:
-    from captcha.image import ImageCaptcha
-except Exception:
-    ImageCaptcha = None
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -60,7 +53,6 @@ CLOUDFLARE_VISION_MODEL = os.environ.get(
     "CLOUDFLARE_VISION_MODEL", "@cf/meta/llama-3.2-11b-vision-instruct"
 ).strip()
 
-DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "admin123").strip()
 SECRET_KEY = os.environ.get("SECRET_KEY", "").strip()
 
 APP_NAME = os.environ.get("FLY_APP_NAME", "")
@@ -89,15 +81,9 @@ bot = telebot.TeleBot(TOKEN, threaded=False) if TOKEN else None
 DEFAULT_DB = {
     "users": [],
     "notify": True,
-    "superadmins": [ADMIN] if ADMIN else [],
-    "api_keys": {},
-    "pending_admins": [],
-    "approved_admins": [ADMIN] if ADMIN else [],
-    "verify_enabled": False,
 }
 
 conversations = {}
-pending_verifications = {}
 
 # ============================================================
 # Database Functions
@@ -111,11 +97,7 @@ def load_db():
             data = json.load(f)
         for key, value in DEFAULT_DB.items():
             if key not in data:
-                data[key] = value.copy() if isinstance(value, (list, dict)) else value
-        if ADMIN and ADMIN not in data.get("superadmins", []):
-            data.setdefault("superadmins", []).append(ADMIN)
-        if ADMIN and ADMIN not in data.get("approved_admins", []):
-            data.setdefault("approved_admins", []).append(ADMIN)
+                data[key] = value.copy() if isinstance(value, list) else value
         return data
     except Exception as exc:
         logger.exception("DB LOAD ERROR: %s", exc)
@@ -132,38 +114,20 @@ def save_db(data):
         logger.exception("DB SAVE ERROR: %s", exc)
 
 
-def is_superadmin(uid):
-    if not uid:
-        return False
-    if ADMIN and int(uid) == ADMIN:
-        return True
+def remember_user(user):
     data = load_db()
-    return int(uid) in [int(x) for x in data.get("superadmins", [])]
-
-
-def is_approved_admin(uid):
-    if not uid:
-        return False
-    if is_superadmin(uid):
-        return True
-    data = load_db()
-    return int(uid) in [int(x) for x in data.get("approved_admins", [])]
-
-
-def generate_api_key():
-    chars = string.ascii_letters + string.digits
-    return "FM.AI_" + "".join(random.choice(chars) for _ in range(30))
-
-
-def get_dashboard_api_key():
-    data = load_db()
-    keys = list(data.get("api_keys", {}).keys())
-    if keys:
-        return keys[0]
-    key = generate_api_key()
-    data.setdefault("api_keys", {})[key] = ADMIN or 0
-    save_db(data)
-    return key
+    if user.id not in data["users"]:
+        data["users"].append(user.id)
+        save_db(data)
+        if data.get("notify", True) and ADMIN:
+            try:
+                bot.send_message(
+                    ADMIN,
+                    f"🆕 مستخدم جديد: {user.first_name}\n🆔: `{user.id}`",
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                pass
 
 # ============================================================
 # AI Functions
@@ -174,13 +138,13 @@ def cloudflare_url(model):
     return f"https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/run/{model}"
 
 
-def ask_ai(text, system_prompt=None, conversation_id=None, model=None, extra_messages=None):
+def ask_ai(text, system_prompt=None, conversation_id=None, model=None):
     api_url = cloudflare_url(model or CLOUDFLARE_MODEL)
     if not api_url or not CLOUDFLARE_API_TOKEN:
         return "⚠️ الذكاء الاصطناعي غير مضبوط حالياً."
 
     system_prompt = system_prompt or (
-        f"اسمك {BOT_NAME}. أجب بالعربية بدقة وودية."
+        f"اسمك {BOT_NAME}. أنت مساعد ذكاء اصطناعي ذكي، ودود، ومتعاون. أجب دائماً بالعربية بدقة وبأسلوب طبيعي ولبق."
     )
     headers = {
         "Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}",
@@ -189,8 +153,6 @@ def ask_ai(text, system_prompt=None, conversation_id=None, model=None, extra_mes
     messages = [{"role": "system", "content": system_prompt}]
     if conversation_id and conversation_id in conversations:
         messages.extend(conversations[conversation_id][-20:])
-    if extra_messages:
-        messages.extend(extra_messages)
     messages.append({"role": "user", "content": text})
     payload = {"messages": messages, "max_tokens": 1800}
 
@@ -229,7 +191,7 @@ def ask_vision(prompt, image_bytes, mime_type="image/jpeg"):
     }
     payload = {
         "messages": [
-            {"role": "system", "content": f"أنت مساعد اسمه {BOT_NAME}. حلل الصور بالعربية بدقة."},
+            {"role": "system", "content": f"أنت مساعد رؤية اسمه {BOT_NAME}. حلل الصور بالعربية بدقة."},
             {"role": "user", "content": [
                 {"type": "text", "text": prompt},
                 {"type": "image_url", "image_url": {"url": image_url}},
@@ -304,62 +266,11 @@ def download_telegram_file(file_id):
         raise ValueError(f"حجم الملف أكبر من الحد المسموح ({MAX_DOWNLOAD_MB}MB).")
     return bot.download_file(info.file_path), info.file_path
 
-# ============================================================
-# Keyboards (Inline Buttons)
-# ============================================================
-def main_menu(is_super=False):
-    kb = types.InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        types.InlineKeyboardButton(text="💬 محادثة", callback_data="chat"),
-        types.InlineKeyboardButton(text="❓ مساعدة", callback_data="help")
-    )
-    kb.add(types.InlineKeyboardButton(text="👨‍💻 المطورين", callback_data="dev"))
-    if is_super:
-        kb.add(types.InlineKeyboardButton(text="👑 المشرفين", callback_data="superadmin"))
-    return kb
 
-
-def back_button():
-    kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="back"))
-    return kb
-
-
-def dev_menu():
-    kb = types.InlineKeyboardMarkup(row_width=1)
-    kb.add(
-        types.InlineKeyboardButton(text="🔑 إنشاء رمز API", callback_data="gen_api"),
-        types.InlineKeyboardButton(text="📖 دليل المطورين", callback_data="dev_guide"),
-        types.InlineKeyboardButton(text="🔙 رجوع", callback_data="back")
-    )
-    return kb
-
-
-def superadmin_menu():
-    kb = types.InlineKeyboardMarkup(row_width=1)
-    kb.add(
-        types.InlineKeyboardButton(text="📢 إذاعة", callback_data="broadcast_menu"),
-        types.InlineKeyboardButton(text="👥 المستخدمين", callback_data="users_count"),
-        types.InlineKeyboardButton(text="🔙 رجوع", callback_data="back")
-    )
-    return kb
-
-
-def broadcast_type_menu():
-    kb = types.InlineKeyboardMarkup(row_width=2)
-    for label, key in [("📝 نص", "text"), ("🖼️ صورة", "photo"), ("🎥 فيديو", "video")]:
-        kb.add(types.InlineKeyboardButton(text=label, callback_data=f"bcast_{key}"))
-    kb.add(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="superadmin"))
-    return kb
-
-
-def approval_buttons(uid):
-    kb = types.InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        types.InlineKeyboardButton(text="✅ موافقة", callback_data=f"approve_{uid}"),
-        types.InlineKeyboardButton(text="❌ رفض", callback_data=f"reject_{uid}")
-    )
-    return kb
+def send_long(chat_id, text):
+    text = text or "لا يوجد رد."
+    for i in range(0, len(text), 4000):
+        bot.send_message(chat_id, text[i:i + 4000])
 
 # ============================================================
 # Flask Endpoints
@@ -370,12 +281,12 @@ def webhook():
         return "Bot disabled", 503
     try:
         raw = request.get_data().decode("utf-8")
-        update = types.Update.de_json(raw)
+        update = telebot.types.Update.de_json(raw)
         if update:
             bot.process_new_updates([update])
         return "OK", 200
     except Exception as exc:
-        logger.exception("Webhook processing error: %s", exc)
+        logger.exception("Webhook error: %s", exc)
         return "Error", 500
 
 
@@ -384,8 +295,7 @@ def index():
     return jsonify({
         "status": "online",
         "bot": BOT_NAME,
-        "webhook": WEBHOOK_URL,
-        "admin_configured": bool(ADMIN)
+        "webhook": WEBHOOK_URL
     })
 
 
@@ -402,156 +312,25 @@ def set_webhook():
         return jsonify({"ok": False, "error": str(exc)}), 500
 
 # ============================================================
-# Telegram Handlers
+# Telegram Handlers (Pure Conversational Bot)
 # ============================================================
-def remember_user(user):
-    data = load_db()
-    if user.id not in data["users"]:
-        data["users"].append(user.id)
-        save_db(data)
-        if data.get("notify", True):
-            for aid in data.get("superadmins", []):
-                try:
-                    bot.send_message(aid, f"🆕 مستخدم جديد: {user.first_name}\n🆔: `{user.id}`", parse_mode="Markdown")
-                except Exception:
-                    pass
-
-
-def send_long(chat_id, text):
-    text = text or "لا يوجد رد."
-    for i in range(0, len(text), 4000):
-        bot.send_message(chat_id, text[i:i + 4000])
-
-
 if bot:
     @bot.message_handler(commands=["start"])
     def cmd_start(message):
         remember_user(message.from_user)
-        user_is_super = is_superadmin(message.from_user.id)
-        welcome = (
-            f"🌟 أهلاً بك {message.from_user.first_name} في {BOT_NAME}!\n\n"
-            "🤖 أستطيع مساعدتك في الإجابة عن الأسئلة، وتحليل الكود والملفات والصور."
-        )
-        bot.send_message(
-            message.chat.id,
-            welcome,
-            reply_markup=main_menu(is_super=user_is_super)
-        )
-
-    # معالج الأزرار الشفافة المصحح بالكامل
-    @bot.callback_query_handler(func=lambda call: True)
-    def handle_all_callbacks(call):
         try:
-            bot.answer_callback_query(callback_query_id=call.id)
+            bot.send_chat_action(message.chat.id, "typing")
         except Exception:
             pass
 
-        chat_id = call.message.chat.id if call.message else call.from_user.id
-        msg_id = call.message.message_id if call.message else None
-        data = call.data
-        user_id = call.from_user.id
-        user_is_super = is_superadmin(user_id)
-        db_data = load_db()
-
-        try:
-            if data == "chat":
-                bot.send_message(chat_id, "💬 أرسل استفسارك الآن وسأجيبك فوراً.", reply_markup=back_button())
-            elif data == "help":
-                bot.send_message(chat_id, "📖 يمكنك إرسال نصوص، صور، أو ملفات برمجية ومستندات وسأقوم بتحليلها لك.", reply_markup=back_button())
-            elif data == "dev":
-                if not is_approved_admin(user_id):
-                    if user_id not in db_data.get("pending_admins", []):
-                        db_data.setdefault("pending_admins", []).append(user_id)
-                        save_db(db_data)
-                        for aid in db_data.get("superadmins", []):
-                            try:
-                                bot.send_message(
-                                    aid,
-                                    f"📩 طلب انضمام مطور:\n👤: {call.from_user.first_name}\n🆔: `{user_id}`",
-                                    parse_mode="Markdown",
-                                    reply_markup=approval_buttons(user_id)
-                                )
-                            except Exception:
-                                pass
-                    bot.send_message(chat_id, "📩 تم إرسال طلبك للإدارة للموافقة.", reply_markup=back_button())
-                else:
-                    bot.send_message(chat_id, "👨‍‍💻 أهلاً بك في لوحة المطورين:", reply_markup=dev_menu())
-            elif data == "gen_api":
-                if not is_approved_admin(user_id):
-                    bot.send_message(chat_id, "⛔ ليس لديك صلاحية مطور بعد.")
-                    return
-                key = generate_api_key()
-                db_data.setdefault("api_keys", {})[key] = user_id
-                save_db(db_data)
-                bot.send_message(chat_id, f"🔑 رمز الـ API الجديد الخاص بك:\n\n`{key}`", parse_mode="Markdown", reply_markup=dev_menu())
-            elif data == "dev_guide":
-                bot.send_message(
-                    chat_id,
-                    f"📖 رابط واجهة الـ API:\n\nPOST {WEBHOOK_HOST}{ENDPOINT_PATH}\nAuthorization: Bearer YOUR_KEY\nJSON: {{\"message\":\"hi\"}}",
-                    reply_markup=dev_menu()
-                )
-            elif data == "superadmin":
-                if not user_is_super:
-                    bot.send_message(chat_id, "⛔ هذا القسم مخصص للمشرفين فقط.")
-                    return
-                bot.send_message(chat_id, "👑 لوحة تحكم المشرفين:", reply_markup=superadmin_menu())
-            elif data == "users_count":
-                if user_is_super:
-                    bot.send_message(chat_id, f"👥 عدد المستخدمين المسجلين: {len(db_data.get('users', []))}", reply_markup=superadmin_menu())
-            elif data == "broadcast_menu":
-                if user_is_super:
-                    bot.send_message(chat_id, "📢 حدد نوع الإذاعة:", reply_markup=broadcast_type_menu())
-            elif data.startswith("bcast_"):
-                if not user_is_super:
-                    return
-                btype = data[6:]
-                sent_msg = bot.send_message(chat_id, f"📝 أرسل الآن محتوى الإذاعة ({btype}):")
-                bot.register_next_step_handler(sent_msg, lambda m: do_broadcast(m, btype))
-            elif data.startswith("approve_"):
-                uid = int(data[8:])
-                if not user_is_super:
-                    return
-                db_data.setdefault("approved_admins", []).append(uid)
-                if uid in db_data.get("pending_admins", []):
-                    db_data["pending_admins"].remove(uid)
-                save_db(db_data)
-                bot.send_message(chat_id, "✅ تمت الموافقة بنجاح.")
-                try:
-                    bot.send_message(uid, "🎉 تمت ترقيتك إلى رتبة مطور بنجاح!")
-                except Exception:
-                    pass
-            elif data.startswith("reject_"):
-                uid = int(data[7:])
-                if not user_is_super:
-                    return
-                if uid in db_data.get("pending_admins", []):
-                    db_data["pending_admins"].remove(uid)
-                save_db(db_data)
-                bot.send_message(chat_id, "❌ تم رفض الطلب.")
-            elif data == "back":
-                bot.send_message(
-                    chat_id,
-                    f"🌟 مرحباً {call.from_user.first_name}، اختر من القائمة:",
-                    reply_markup=main_menu(is_super=user_is_super)
-                )
-        except Exception as exc:
-            logger.exception("Error processing callback data %s: %s", data, exc)
-
-    def do_broadcast(msg, btype):
-        db_data = load_db()
-        ok_count = 0
-        for uid in db_data.get("users", []):
-            try:
-                if btype == "text" and msg.text:
-                    bot.send_message(uid, f"📢 إشعار:\n\n{msg.text}")
-                elif btype == "photo" and msg.photo:
-                    bot.send_photo(uid, msg.photo[-1].file_id, caption=msg.caption or "")
-                elif btype == "video" and msg.video:
-                    bot.send_video(uid, msg.video.file_id, caption=msg.caption or "")
-                ok_count += 1
-            except Exception:
-                pass
-        bot.reply_to(msg, f"✅ تم إرسال الإذاعة إلى {ok_count} مستخدم.")
+        # رسالة ترحيبية يولدها الذكاء الاصطناعي مباشرة
+        prompt = (
+            f"مستخدم جديد بدأ المحادثة معك. اسمه: {message.from_user.first_name}.\n"
+            f"رحب به ترحيباً مميزاً ودافئاً باسمك ({BOT_NAME})، وأخبره باختصار أنك جاهز لمساعدته "
+            "في أي استفسار، وتحليل الكود، وقراءة الملفات البرمجية والمستندات (PDF/DOCX) وتحليل الصور عند إرسالها."
+        )
+        reply = ask_ai(prompt, conversation_id=f"tg-{message.from_user.id}")
+        send_long(message.chat.id, reply or f"أهلاً بك يا {message.from_user.first_name} في {BOT_NAME}! كيف يمكنني مساعدتك اليوم؟")
 
     @bot.message_handler(content_types=["photo"])
     def handle_photo(message):
@@ -560,7 +339,7 @@ if bot:
             bot.send_chat_action(message.chat.id, "typing")
             photo = message.photo[-1]
             raw, _ = download_telegram_file(photo.file_id)
-            prompt = message.caption or "صف الصورة بدقة وحلل محتواها بالعربية."
+            prompt = message.caption or "صف الصورة بدقة وحلل محتواها وما يظهر فيها بالعربية."
             reply = ask_vision(prompt, raw, "image/jpeg")
             send_long(message.chat.id, reply or "⚠️ لم أتمكن من استخراج تفاصيل الصورة.")
         except Exception as exc:
@@ -578,10 +357,11 @@ if bot:
             if not text:
                 bot.send_message(message.chat.id, "⚠️ نوع الملف غير مدعوم للتحليل النصي.")
                 return
-            reply = ask_ai(f"حلل المحتوى التالي:\n\n{text[:MAX_TEXT_CHARS]}")
+            prompt = f"حلل الملف التالي ({filename}) واشرح محتواه وأهم النقاط فيه:\n\n{text[:MAX_TEXT_CHARS]}"
+            reply = ask_ai(prompt)
             send_long(message.chat.id, reply or "⚠️ تعذر التحليل.")
         except Exception as exc:
-            bot.reply_to(message, f"⚠️️ حدث خطأ: {exc}")
+            bot.reply_to(message, f"⚠️ حدث خطأ: {exc}")
 
     @bot.message_handler(content_types=["text"])
     def handle_text(message):
