@@ -180,7 +180,7 @@ def ask_ai(text, system_prompt=None, conversation_id=None, model=None, extra_mes
         return "⚠️ الذكاء الاصطناعي غير مضبوط حالياً."
 
     system_prompt = system_prompt or (
-        f"اسمك {BOT_NAME}. أجب بالعربية بدقة ووضوح."
+        f"اسمك {BOT_NAME}. أجب بالعربية بدقة وودية."
     )
     headers = {
         "Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}",
@@ -305,32 +305,32 @@ def download_telegram_file(file_id):
     return bot.download_file(info.file_path), info.file_path
 
 # ============================================================
-# Keyboards
+# Keyboards (Inline Buttons)
 # ============================================================
 def main_menu(is_super=False):
     kb = types.InlineKeyboardMarkup(row_width=2)
     kb.add(
-        types.InlineKeyboardButton("💬 محادثة", callback_data="chat"),
-        types.InlineKeyboardButton("❓ مساعدة", callback_data="help")
+        types.InlineKeyboardButton(text="💬 محادثة", callback_data="chat"),
+        types.InlineKeyboardButton(text="❓ مساعدة", callback_data="help")
     )
-    kb.add(types.InlineKeyboardButton("👨‍💻 المطورين", callback_data="dev"))
+    kb.add(types.InlineKeyboardButton(text="👨‍💻 المطورين", callback_data="dev"))
     if is_super:
-        kb.add(types.InlineKeyboardButton("👑 المشرفين", callback_data="superadmin"))
+        kb.add(types.InlineKeyboardButton(text="👑 المشرفين", callback_data="superadmin"))
     return kb
 
 
 def back_button():
     kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="back"))
+    kb.add(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="back"))
     return kb
 
 
 def dev_menu():
     kb = types.InlineKeyboardMarkup(row_width=1)
     kb.add(
-        types.InlineKeyboardButton("🔑 إنشاء رمز API", callback_data="gen_api"),
-        types.InlineKeyboardButton("📖 دليل المطورين", callback_data="dev_guide"),
-        types.InlineKeyboardButton("🔙 رجوع", callback_data="back")
+        types.InlineKeyboardButton(text="🔑 إنشاء رمز API", callback_data="gen_api"),
+        types.InlineKeyboardButton(text="📖 دليل المطورين", callback_data="dev_guide"),
+        types.InlineKeyboardButton(text="🔙 رجوع", callback_data="back")
     )
     return kb
 
@@ -338,9 +338,9 @@ def dev_menu():
 def superadmin_menu():
     kb = types.InlineKeyboardMarkup(row_width=1)
     kb.add(
-        types.InlineKeyboardButton("📢 إذاعة", callback_data="broadcast_menu"),
-        types.InlineKeyboardButton("👥 المستخدمين", callback_data="users_count"),
-        types.InlineKeyboardButton("🔙 رجوع", callback_data="back")
+        types.InlineKeyboardButton(text="📢 إذاعة", callback_data="broadcast_menu"),
+        types.InlineKeyboardButton(text="👥 المستخدمين", callback_data="users_count"),
+        types.InlineKeyboardButton(text="🔙 رجوع", callback_data="back")
     )
     return kb
 
@@ -348,16 +348,16 @@ def superadmin_menu():
 def broadcast_type_menu():
     kb = types.InlineKeyboardMarkup(row_width=2)
     for label, key in [("📝 نص", "text"), ("🖼️ صورة", "photo"), ("🎥 فيديو", "video")]:
-        kb.add(types.InlineKeyboardButton(label, callback_data=f"bcast_{key}"))
-    kb.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="superadmin"))
+        kb.add(types.InlineKeyboardButton(text=label, callback_data=f"bcast_{key}"))
+    kb.add(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="superadmin"))
     return kb
 
 
 def approval_buttons(uid):
     kb = types.InlineKeyboardMarkup(row_width=2)
     kb.add(
-        types.InlineKeyboardButton("✅ موافقة", callback_data=f"approve_{uid}"),
-        types.InlineKeyboardButton("❌ رفض", callback_data=f"reject_{uid}")
+        types.InlineKeyboardButton(text="✅ موافقة", callback_data=f"approve_{uid}"),
+        types.InlineKeyboardButton(text="❌ رفض", callback_data=f"reject_{uid}")
     )
     return kb
 
@@ -371,7 +371,8 @@ def webhook():
     try:
         raw = request.get_data().decode("utf-8")
         update = types.Update.de_json(raw)
-        bot.process_new_updates([update])
+        if update:
+            bot.process_new_updates([update])
         return "OK", 200
     except Exception as exc:
         logger.exception("Webhook processing error: %s", exc)
@@ -437,19 +438,16 @@ if bot:
             reply_markup=main_menu(is_super=user_is_super)
         )
 
-    # معالج الأزرار الشفافة المصحح
+    # معالج الأزرار الشفافة المصحح بالكامل
     @bot.callback_query_handler(func=lambda call: True)
     def handle_all_callbacks(call):
         try:
-            bot.answer_callback_query(call.id)
+            bot.answer_callback_query(callback_query_id=call.id)
         except Exception:
             pass
 
-        if not call.message:
-            return
-
-        chat_id = call.message.chat.id
-        msg_id = call.message.message_id
+        chat_id = call.message.chat.id if call.message else call.from_user.id
+        msg_id = call.message.message_id if call.message else None
         data = call.data
         user_id = call.from_user.id
         user_is_super = is_superadmin(user_id)
@@ -457,19 +455,9 @@ if bot:
 
         try:
             if data == "chat":
-                bot.edit_message_text(
-                    "💬 أرسل استفسارك الآن وسأجيبك فوراً.",
-                    chat_id=chat_id,
-                    message_id=msg_id,
-                    reply_markup=back_button()
-                )
+                bot.send_message(chat_id, "💬 أرسل استفسارك الآن وسأجيبك فوراً.", reply_markup=back_button())
             elif data == "help":
-                bot.edit_message_text(
-                    "📖 يمكنك إرسال نصوص، صور، أو ملفات برمجية لتحليلها.",
-                    chat_id=chat_id,
-                    message_id=msg_id,
-                    reply_markup=back_button()
-                )
+                bot.send_message(chat_id, "📖 يمكنك إرسال نصوص، صور، أو ملفات برمجية ومستندات وسأقوم بتحليلها لك.", reply_markup=back_button())
             elif data == "dev":
                 if not is_approved_admin(user_id):
                     if user_id not in db_data.get("pending_admins", []):
@@ -485,19 +473,9 @@ if bot:
                                 )
                             except Exception:
                                 pass
-                    bot.edit_message_text(
-                        "📩 تم إرسال طلبك للإدارة للموافقة.",
-                        chat_id=chat_id,
-                        message_id=msg_id,
-                        reply_markup=back_button()
-                    )
+                    bot.send_message(chat_id, "📩 تم إرسال طلبك للإدارة للموافقة.", reply_markup=back_button())
                 else:
-                    bot.edit_message_text(
-                        "👨‍💻 أهلاً بك في لوحة المطورين:",
-                        chat_id=chat_id,
-                        message_id=msg_id,
-                        reply_markup=dev_menu()
-                    )
+                    bot.send_message(chat_id, "👨‍‍💻 أهلاً بك في لوحة المطورين:", reply_markup=dev_menu())
             elif data == "gen_api":
                 if not is_approved_admin(user_id):
                     bot.send_message(chat_id, "⛔ ليس لديك صلاحية مطور بعد.")
@@ -505,55 +483,29 @@ if bot:
                 key = generate_api_key()
                 db_data.setdefault("api_keys", {})[key] = user_id
                 save_db(db_data)
-                bot.edit_message_text(
-                    f"🔑 رمز الـ API الجديد الخاص بك:\n\n`{key}`",
-                    chat_id=chat_id,
-                    message_id=msg_id,
-                    parse_mode="Markdown",
-                    reply_markup=dev_menu()
-                )
+                bot.send_message(chat_id, f"🔑 رمز الـ API الجديد الخاص بك:\n\n`{key}`", parse_mode="Markdown", reply_markup=dev_menu())
             elif data == "dev_guide":
-                bot.edit_message_text(
+                bot.send_message(
+                    chat_id,
                     f"📖 رابط واجهة الـ API:\n\nPOST {WEBHOOK_HOST}{ENDPOINT_PATH}\nAuthorization: Bearer YOUR_KEY\nJSON: {{\"message\":\"hi\"}}",
-                    chat_id=chat_id,
-                    message_id=msg_id,
                     reply_markup=dev_menu()
                 )
             elif data == "superadmin":
                 if not user_is_super:
                     bot.send_message(chat_id, "⛔ هذا القسم مخصص للمشرفين فقط.")
                     return
-                bot.edit_message_text(
-                    "👑 لوحة تحكم المشرفين:",
-                    chat_id=chat_id,
-                    message_id=msg_id,
-                    reply_markup=superadmin_menu()
-                )
+                bot.send_message(chat_id, "👑 لوحة تحكم المشرفين:", reply_markup=superadmin_menu())
             elif data == "users_count":
                 if user_is_super:
-                    bot.edit_message_text(
-                        f"👥 عدد المستخدمين: {len(db_data.get('users', []))}",
-                        chat_id=chat_id,
-                        message_id=msg_id,
-                        reply_markup=superadmin_menu()
-                    )
+                    bot.send_message(chat_id, f"👥 عدد المستخدمين المسجلين: {len(db_data.get('users', []))}", reply_markup=superadmin_menu())
             elif data == "broadcast_menu":
                 if user_is_super:
-                    bot.edit_message_text(
-                        "📢 حدد نوع الإذاعة:",
-                        chat_id=chat_id,
-                        message_id=msg_id,
-                        reply_markup=broadcast_type_menu()
-                    )
+                    bot.send_message(chat_id, "📢 حدد نوع الإذاعة:", reply_markup=broadcast_type_menu())
             elif data.startswith("bcast_"):
                 if not user_is_super:
                     return
                 btype = data[6:]
-                sent_msg = bot.edit_message_text(
-                    f"📝 أرسل الآن رسالة الإذاعة ({btype}):",
-                    chat_id=chat_id,
-                    message_id=msg_id
-                )
+                sent_msg = bot.send_message(chat_id, f"📝 أرسل الآن محتوى الإذاعة ({btype}):")
                 bot.register_next_step_handler(sent_msg, lambda m: do_broadcast(m, btype))
             elif data.startswith("approve_"):
                 uid = int(data[8:])
@@ -563,7 +515,7 @@ if bot:
                 if uid in db_data.get("pending_admins", []):
                     db_data["pending_admins"].remove(uid)
                 save_db(db_data)
-                bot.edit_message_text("✅ تمت الموافقة بنجاح.", chat_id=chat_id, message_id=msg_id)
+                bot.send_message(chat_id, "✅ تمت الموافقة بنجاح.")
                 try:
                     bot.send_message(uid, "🎉 تمت ترقيتك إلى رتبة مطور بنجاح!")
                 except Exception:
@@ -575,12 +527,11 @@ if bot:
                 if uid in db_data.get("pending_admins", []):
                     db_data["pending_admins"].remove(uid)
                 save_db(db_data)
-                bot.edit_message_text("❌ تم رفض الطلب.", chat_id=chat_id, message_id=msg_id)
+                bot.send_message(chat_id, "❌ تم رفض الطلب.")
             elif data == "back":
-                bot.edit_message_text(
+                bot.send_message(
+                    chat_id,
                     f"🌟 مرحباً {call.from_user.first_name}، اختر من القائمة:",
-                    chat_id=chat_id,
-                    message_id=msg_id,
                     reply_markup=main_menu(is_super=user_is_super)
                 )
         except Exception as exc:
@@ -630,7 +581,7 @@ if bot:
             reply = ask_ai(f"حلل المحتوى التالي:\n\n{text[:MAX_TEXT_CHARS]}")
             send_long(message.chat.id, reply or "⚠️ تعذر التحليل.")
         except Exception as exc:
-            bot.reply_to(message, f"⚠️ حدث خطأ: {exc}")
+            bot.reply_to(message, f"⚠️️ حدث خطأ: {exc}")
 
     @bot.message_handler(content_types=["text"])
     def handle_text(message):
